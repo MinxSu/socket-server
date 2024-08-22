@@ -1,0 +1,36 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+
+# Ignore packages that have been restored
+# .NET
+*.nupkg.metadata
+*.packages
+
+# Test results
+[Tt]est[Rr]esult.*
+[Tt]est[Ll]ogs/*
+
+# NUGET
+# Ignore package target files
+*.nuget.props
+
+# Visual Studio Code
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Visual Studio cache/options directory
+.vs/
+
+# Rider
+.idea/
+
+# Build output
+/Server/bin/
+/Server/obj/
+
