@@ -7,28 +7,42 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        var ipEndPoint = new IPEndPoint(IPAddress.Any, 8080);
-        TcpListener listener = new(ipEndPoint);
+        var ipEndPoint = new IPEndPoint(IPAddress.Any, 8082);
+        //TcpListener listener = new(ipEndPoint);
 
-        try
-        {
-            listener.Start();
+        using Socket listener = new(
+            ipEndPoint.AddressFamily,
+            SocketType.Stream,
+            ProtocolType.Tcp);
 
-            using TcpClient handler = await listener.AcceptTcpClientAsync();
-            await using NetworkStream stream = handler.GetStream();
+        listener.Bind(ipEndPoint);
+        listener.Listen(100);
 
-            var message = $"Receive Message At: {DateTime.Now}";
-            Console.Write(message);
-            var dateTimeBytes = Encoding.UTF8.GetBytes(message);
-            await stream.WriteAsync(dateTimeBytes);
-        }
-        catch (Exception ex)
+        var handler = await listener.AcceptAsync();
+        while (true)
         {
-            Console.Write(ex.Message);
-        }
-        finally
-        {
-            // listener.Stop();
+            // Receive message.
+            var buffer = new byte[1_024];
+            var received = await handler.ReceiveAsync(buffer, SocketFlags.None);
+            var response = Encoding.UTF8.GetString(buffer, 0, received);
+
+            var eom = "<|EOM|>";
+            if (response.IndexOf(eom) > -1 /* is end of message */)
+            {
+                Console.WriteLine(
+                    $"Socket server received message: \"{response.Replace(eom, "")}\"");
+
+                var ackMessage = "<|ACK|>";
+                var echoBytes = Encoding.UTF8.GetBytes(ackMessage);
+                await handler.SendAsync(echoBytes, 0);
+                Console.WriteLine(
+                    $"Socket server sent acknowledgment: \"{ackMessage}\"");
+
+                // break;
+            }
+            // Sample output:
+            //    Socket server received message: "Hi friends 👋!"
+            //    Socket server sent acknowledgment: "<|ACK|>"
         }
     }
 }
