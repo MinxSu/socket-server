@@ -1,48 +1,92 @@
-﻿using System.Net;
-using System.Net.Sockets;
+﻿using System.Collections.Concurrent;
+using System.Net;
+using System.Net.WebSockets;
 using System.Text;
 
-namespace Server;
-class Program
+class WebSocketServer
 {
+    private static ConcurrentDictionary<Guid, WebSocket> _clients = new ConcurrentDictionary<Guid, WebSocket>();
+
     static async Task Main(string[] args)
     {
-        var ipEndPoint = new IPEndPoint(IPAddress.Any, 8082);
-        //TcpListener listener = new(ipEndPoint);
+        var listener = new HttpListener();
+        listener.Prefixes.Add("http://*:8766/");
+        listener.Start();
+        Console.WriteLine("WebSocket Server Start: 8766...");
 
-        using Socket listener = new(
-            ipEndPoint.AddressFamily,
-            SocketType.Stream,
-            ProtocolType.Tcp);
-
-        listener.Bind(ipEndPoint);
-        listener.Listen(100);
-
-        var handler = await listener.AcceptAsync();
         while (true)
         {
-            // Receive message.
-            var buffer = new byte[1_024];
-            var received = await handler.ReceiveAsync(buffer, SocketFlags.None);
-            var response = Encoding.UTF8.GetString(buffer, 0, received);
-
-            var eom = "<|EOM|>";
-            if (response.IndexOf(eom) > -1 /* is end of message */)
+            HttpListenerContext context = await listener.GetContextAsync();
+            if (context.Request.IsWebSocketRequest)
             {
-                Console.WriteLine(
-                    $"Socket server received message: \"{response.Replace(eom, "")}\"");
-
-                var ackMessage = "<|ACK|>";
-                var echoBytes = Encoding.UTF8.GetBytes(ackMessage);
-                await handler.SendAsync(echoBytes, 0);
-                Console.WriteLine(
-                    $"Socket server sent acknowledgment: \"{ackMessage}\"");
-
-                // break;
+                ProcessWebSocketRequest(context);
             }
-            // Sample output:
-            //    Socket server received message: "Hi friends 👋!"
-            //    Socket server sent acknowledgment: "<|ACK|>"
+            else
+            {
+                context.Response.StatusCode = 400;
+                context.Response.Close();
+            }
         }
+    }
+
+    private static async void ProcessWebSocketRequest(HttpListenerContext context)
+    {
+        HttpListenerWebSocketContext webSocketContext = await context.AcceptWebSocketAsync(null);
+        WebSocket webSocket = webSocketContext.WebSocket;
+
+        var clientId = Guid.NewGuid();
+        _clients.TryAdd(clientId, webSocket);
+        Console.WriteLine($"client connected: {clientId}");
+
+        try
+        {
+            await HandleWebSocketConnection(webSocket, clientId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"WebSocket Error: {ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                _clients.TryRemove(clientId, out _);
+                await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                Console.WriteLine($"client disconnected: {clientId}");
+            }
+            catch
+            {
+                Console.WriteLine($"disconnected failed: {clientId}");
+            }
+        }
+    }
+
+    private static async Task HandleWebSocketConnection(WebSocket webSocket, Guid clientId)
+    {
+        var buffer = new byte[1024 * 4];
+        while (webSocket.State == WebSocketState.Open)
+        {
+            var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+
+            if (result.MessageType == WebSocketMessageType.Text)
+            {
+                string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                Console.WriteLine($"Received Message: {message}");
+
+                // reply
+                string reply = $"Server Received: {message}";
+                await SendMessageAsync(webSocket, reply);
+            }
+            else if (result.MessageType == WebSocketMessageType.Close)
+            {
+                break;
+            }
+        }
+    }
+
+    private static async Task SendMessageAsync(WebSocket socket, string message)
+    {
+        byte[] buffer = Encoding.UTF8.GetBytes(message);
+        await socket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
     }
 }
